@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+build/
+dist/
+.venv/
+# 정리 결과물/임시/백업 파일
+*_정리됨.xlsx
+*_정리됨.xlsm
+*_정리됨.xltx
+*_정리됨.xltm
+*_정리됨.pptx
+*_정리됨.pptm
+*_정리됨.potx
+*.tmp_renew
+*.bak
+*.bak[0-9]*
+# 주의: 빌드 스펙(build.spec)은 저장소에 포함되어야 하므로 *.spec 을 무시하지 않습니다.
