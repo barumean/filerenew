@@ -80,7 +80,7 @@ class CleanerTab(ttk.Frame):
         ).pack(anchor="w", padx=10)
 
         # --- 파일 목록 ---
-        list_frame = ttk.LabelFrame(self, text="정리할 파일")
+        list_frame = ttk.LabelFrame(self, text="1. 정리할 파일 추가")
         list_frame.pack(fill="both", expand=True, padx=10, pady=4)
 
         if DND_AVAILABLE:
@@ -110,12 +110,12 @@ class CleanerTab(ttk.Frame):
         ttk.Button(btn_col, text="목록 비우기", command=self.clear_files).pack(fill="x", pady=2)
 
         # --- 정리 항목(탭 고유) ---
-        opt_frame = ttk.LabelFrame(self, text="정리 항목")
+        opt_frame = ttk.LabelFrame(self, text="2. 정리 항목 선택")
         opt_frame.pack(fill="x", padx=10, pady=4)
         self._build_options(opt_frame)
 
         # --- 저장 방식 ---
-        save_frame = ttk.LabelFrame(self, text="저장 방식")
+        save_frame = ttk.LabelFrame(self, text="3. 저장 방식 선택")
         save_frame.pack(fill="x", padx=10, pady=4)
         ttk.Radiobutton(
             save_frame,
@@ -129,8 +129,9 @@ class CleanerTab(ttk.Frame):
         ).pack(anchor="w", padx=10, pady=2)
 
         # --- 실행 버튼 ---
-        self.run_btn = ttk.Button(self, text="정리 실행", command=self.run)
-        self.run_btn.pack(fill="x", padx=10, pady=(8, 4))
+        self.run_btn = ttk.Button(
+            self, text="4. 정리 실행", command=self.run, style="Run.TButton")
+        self.run_btn.pack(fill="x", padx=10, pady=(8, 4), ipady=4)
 
         # --- 결과 로그 ---
         log_frame = ttk.LabelFrame(self, text="결과")
@@ -346,7 +347,7 @@ class FileRenewApp:
         root.geometry("720x680")
         root.minsize(640, 600)
 
-        self._setup_tab_style()
+        self._setup_styles()
 
         notebook = ttk.Notebook(root, style="Big.TNotebook")
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
@@ -354,24 +355,22 @@ class FileRenewApp:
         notebook.add(PptTab(notebook), text="  📑  PPT 정리기  ")
 
     @staticmethod
-    def _setup_tab_style():
-        """탭을 크고 잘 보이게: 글꼴·여백을 키우고 선택 탭을 강조한다."""
+    def _setup_styles():
+        """탭과 실행 버튼 스타일: 선택 탭은 크게, 비선택 탭은 작게."""
         style = ttk.Style()
-        # 탭 글자를 크고 굵게, 좌우/상하 여백을 넉넉히
-        style.configure(
-            "Big.TNotebook.Tab",
-            font=("", 13, "bold"),
-            padding=(28, 12),
-        )
-        # 탭 막대와 본문 사이 간격을 살짝 띄워 구분을 또렷하게
+        # 비선택(기본) 탭: 작은 글자 + 좁은 여백
         style.configure("Big.TNotebook", tabmargins=(4, 6, 4, 0))
-        # 선택된 탭은 흰 배경 + 파란 글자, 비선택 탭은 회색조로 대비
+        style.configure("Big.TNotebook.Tab", font=("", 10), padding=(14, 5))
+        # 선택된 탭만 크고 굵게 + 흰 배경/파란 글자, 비선택은 작고 회색조
         style.map(
             "Big.TNotebook.Tab",
-            background=[("selected", "#ffffff"), ("!selected", "#d9dde2")],
-            foreground=[("selected", "#1a5fb4"), ("!selected", "#555555")],
-            expand=[("selected", (1, 1, 1, 0))],  # 선택 탭을 살짝 키워 부각
+            font=[("selected", ("", 14, "bold"))],    # 선택 탭 글자가 더 크다
+            expand=[("selected", (6, 4, 6, 2))],      # 선택 탭 박스를 확실히 키움
+            background=[("selected", "#ffffff"), ("!selected", "#cfd4da")],
+            foreground=[("selected", "#1a5fb4"), ("!selected", "#666666")],
         )
+        # '정리 실행' 버튼을 크고 굵게
+        style.configure("Run.TButton", font=("", 14, "bold"), padding=(10, 14))
 
 
 def main():
