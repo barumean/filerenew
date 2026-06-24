@@ -4,9 +4,10 @@ gui.py
 ======
 파일 정리기(엑셀 + PPT)의 그래픽 사용자 인터페이스(GUI).
 
-엑셀 정리기와 PPT 정리기를 하나의 창으로 통합했습니다. 파일을 추가하면
-확장자에 따라 자동으로 알맞은 정리가 적용됩니다(엑셀 ↔ PPT 옵션은
-서로의 파일에는 영향을 주지 않습니다).
+하나의 창 안에서 **탭(Notebook)으로 [엑셀 정리기] 와 [PPT 정리기] 기능을
+분리**합니다. 각 탭은 자기만의 파일 목록·정리 옵션·실행 버튼·결과 로그를
+독립적으로 가집니다. 두 탭은 같은 레이아웃 골격(CleanerTab)을 공유하므로
+모양과 사용법이 통일되어 있습니다.
 
 파이썬 표준 라이브러리(tkinter)만 사용하므로 별도 설치가 필요 없으며,
 Windows 에서는 PyInstaller 로 .exe 단일 실행 파일을 만들 수 있습니다.
@@ -22,13 +23,9 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from filerenew.dispatcher import (
-    DEFAULT_FONT,
-    EXCEL_EXTS,
-    PPT_EXTS,
-    SUPPORTED_EXTS,
-    clean_file,
-)
+from filerenew.dispatcher import DEFAULT_FONT, EXCEL_EXTS, PPT_EXTS
+from filerenew.excel_cleaner import clean_workbook
+from filerenew.ppt_cleaner import clean_presentation
 
 # 드래그 앤 드롭(tkinterdnd2)이 설치돼 있으면 사용하고, 없으면 버튼 방식으로
 # 자동 폴백한다. (tkinterdnd2 는 OS 파일 끌어다 놓기를 지원하는 외부 라이브러리)
@@ -41,76 +38,62 @@ except Exception:  # noqa: BLE001
 
 APP_TITLE = "파일 정리기 (File Renew)"
 
-# 지원하는 파일 형식(확장자) 표시 문자열.
-SUPPORTED_DISPLAY = " ".join(sorted(SUPPORTED_EXTS))
-FILETYPES = [
-    ("지원 파일 (엑셀·PPT)", " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTS))),
-    ("엑셀 파일", " ".join(f"*{e}" for e in sorted(EXCEL_EXTS))),
-    ("PowerPoint 파일", " ".join(f"*{e}" for e in sorted(PPT_EXTS))),
-    ("모든 파일", "*.*"),
-]
 
+# ===========================================================================
+# 탭 공통 골격
+# ===========================================================================
+class CleanerTab(ttk.Frame):
+    """
+    엑셀/PPT 탭이 공유하는 공통 UI 골격.
 
-class FileRenewApp:
-    def __init__(self, root: tk.Tk):
-        self.root = root
+    파일 목록(추가/제거/비우기 + 드래그 앤 드롭) · 저장 방식 · 실행 버튼 ·
+    결과 로그를 만들어 준다. 탭별로 다른 부분은 다음 두 가지뿐이다.
+      - ``_build_options(parent)`` : 탭 고유 정리 옵션 패널
+      - ``_clean_one(path, overwrite)`` : 파일 한 개 처리(→ CleanResult)
+    """
+
+    # 서브클래스에서 채운다.
+    intro = ""
+    supported_exts: set = set()
+    filetypes: list = []
+
+    def __init__(self, master):
+        super().__init__(master)
         self.files: list[str] = []
-
-        root.title(APP_TITLE)
-        root.geometry("760x720")
-        root.minsize(680, 640)
-
-        # 공통 저장 옵션
         self.opt_overwrite = tk.BooleanVar(value=False)
-
-        # 엑셀 작업 옵션
-        self.opt_names = tk.BooleanVar(value=True)
-        self.opt_links = tk.BooleanVar(value=True)
-        self.opt_unhide = tk.BooleanVar(value=True)
-        self.opt_keep_print = tk.BooleanVar(value=True)
-
-        # PPT 작업 옵션
-        self.opt_replace_fonts = tk.BooleanVar(value=True)
-        self.opt_remove_embedded = tk.BooleanVar(value=True)
-        self.font_var = tk.StringVar(value=DEFAULT_FONT)
-
         self._build_ui()
+
+    @property
+    def supported_display(self) -> str:
+        return " ".join(sorted(self.supported_exts))
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
         pad = {"padx": 10, "pady": 6}
 
-        # --- 상단 안내 ---
+        ttk.Label(self, text=self.intro, font=("", 11, "bold")).pack(
+            anchor="w", **pad)
         ttk.Label(
-            self.root,
-            text="엑셀과 PPT를 한 번에 정리합니다 — 엑셀의 깨진 이름·외부 링크·숨겨진 시트,"
-            " PPT의 비표준·임베드 폰트.",
-            font=("", 11, "bold"),
-        ).pack(anchor="w", **pad)
-
-        ttk.Label(
-            self.root,
-            text=f"지원 형식: {SUPPORTED_DISPLAY}  "
-            "(구형 .xls 는 미지원 — 엑셀에서 .xlsx 로 저장 후 사용)",
+            self,
+            text=f"지원 형식: {self.supported_display}",
             foreground="#555",
         ).pack(anchor="w", padx=10)
 
-        # --- 파일 목록 영역 ---
-        list_frame = ttk.LabelFrame(self.root, text="정리할 파일")
+        # --- 파일 목록 ---
+        list_frame = ttk.LabelFrame(self, text="정리할 파일")
         list_frame.pack(fill="both", expand=True, padx=10, pady=4)
 
         if DND_AVAILABLE:
-            hint = "↓ 여기로 엑셀·PPT 파일을 끌어다 놓거나, '파일 추가…' 버튼을 누르세요"
+            hint = "↓ 여기로 파일을 끌어다 놓거나, '파일 추가…' 버튼을 누르세요"
         else:
             hint = "'파일 추가…' 버튼으로 파일을 선택하세요 (드래그 앤 드롭은 tkinterdnd2 설치 시 활성화)"
         ttk.Label(list_frame, text=hint, foreground="#777").pack(
-            anchor="w", padx=10, pady=(6, 0)
-        )
+            anchor="w", padx=10, pady=(6, 0))
 
         inner = ttk.Frame(list_frame)
         inner.pack(fill="both", expand=True)
 
-        self.listbox = tk.Listbox(inner, selectmode=tk.EXTENDED, height=8)
+        self.listbox = tk.Listbox(inner, selectmode=tk.EXTENDED, height=7)
         self.listbox.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
         sb = ttk.Scrollbar(inner, orient="vertical", command=self.listbox.yview)
         sb.pack(side="left", fill="y", pady=8)
@@ -126,47 +109,13 @@ class FileRenewApp:
         ttk.Button(btn_col, text="선택 제거", command=self.remove_selected).pack(fill="x", pady=2)
         ttk.Button(btn_col, text="목록 비우기", command=self.clear_files).pack(fill="x", pady=2)
 
-        # --- 옵션 영역: 엑셀/PPT 를 좌우로 나란히 배치 ---
-        opt_row = ttk.Frame(self.root)
-        opt_row.pack(fill="x", padx=10, pady=4)
+        # --- 정리 항목(탭 고유) ---
+        opt_frame = ttk.LabelFrame(self, text="정리 항목")
+        opt_frame.pack(fill="x", padx=10, pady=4)
+        self._build_options(opt_frame)
 
-        excel_frame = ttk.LabelFrame(opt_row, text="엑셀 정리 항목")
-        excel_frame.pack(side="left", fill="both", expand=True, padx=(0, 4))
-        ttk.Checkbutton(
-            excel_frame, text="정의된 이름(Names) 전부 삭제 — 깨진/숨겨진 이름 포함",
-            variable=self.opt_names,
-        ).pack(anchor="w", padx=10, pady=2)
-        ttk.Checkbutton(
-            excel_frame, text="외부 링크/연결 제거 — 다른 통합문서 참조 제거",
-            variable=self.opt_links,
-        ).pack(anchor="w", padx=10, pady=2)
-        ttk.Checkbutton(
-            excel_frame, text="숨겨진 시트 다시 표시 — hidden/veryHidden 복구",
-            variable=self.opt_unhide,
-        ).pack(anchor="w", padx=10, pady=2)
-        ttk.Checkbutton(
-            excel_frame, text="인쇄 영역(Print Area)은 유지",
-            variable=self.opt_keep_print,
-        ).pack(anchor="w", padx=10, pady=2)
-
-        ppt_frame = ttk.LabelFrame(opt_row, text="PPT 정리 항목")
-        ppt_frame.pack(side="left", fill="both", expand=True, padx=(4, 0))
-        ttk.Checkbutton(
-            ppt_frame, text="비표준 폰트를 기본 폰트로 치환",
-            variable=self.opt_replace_fonts,
-        ).pack(anchor="w", padx=10, pady=2)
-        ttk.Checkbutton(
-            ppt_frame, text="임베드(끼워넣은) 폰트 제거",
-            variable=self.opt_remove_embedded,
-        ).pack(anchor="w", padx=10, pady=2)
-        font_row = ttk.Frame(ppt_frame)
-        font_row.pack(anchor="w", fill="x", padx=10, pady=2)
-        ttk.Label(font_row, text="대치 기본 폰트:").pack(side="left")
-        ttk.Entry(font_row, textvariable=self.font_var, width=18).pack(
-            side="left", padx=(4, 0))
-
-        # --- 저장 방식 (공통) ---
-        save_frame = ttk.LabelFrame(self.root, text="저장 방식 (엑셀·PPT 공통)")
+        # --- 저장 방식 ---
+        save_frame = ttk.LabelFrame(self, text="저장 방식")
         save_frame.pack(fill="x", padx=10, pady=4)
         ttk.Radiobutton(
             save_frame,
@@ -180,36 +129,40 @@ class FileRenewApp:
         ).pack(anchor="w", padx=10, pady=2)
 
         # --- 실행 버튼 ---
-        self.run_btn = ttk.Button(self.root, text="정리 실행", command=self.run)
+        self.run_btn = ttk.Button(self, text="정리 실행", command=self.run)
         self.run_btn.pack(fill="x", padx=10, pady=(8, 4))
 
         # --- 결과 로그 ---
-        log_frame = ttk.LabelFrame(self.root, text="결과")
+        log_frame = ttk.LabelFrame(self, text="결과")
         log_frame.pack(fill="both", expand=True, padx=10, pady=(4, 10))
-        self.log = tk.Text(log_frame, height=8, wrap="word", state="disabled")
+        self.log = tk.Text(log_frame, height=7, wrap="word", state="disabled")
         self.log.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
         lsb = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         lsb.pack(side="left", fill="y", pady=8)
         self.log.config(yscrollcommand=lsb.set)
 
+    # --------------------------------------------------- 서브클래스 구현부
+    def _build_options(self, parent):  # pragma: no cover - UI
+        raise NotImplementedError
+
+    def _clean_one(self, path: str, overwrite: bool):  # pragma: no cover - UI
+        raise NotImplementedError
+
     # -------------------------------------------------------------- actions
     def add_files(self):
-        paths = filedialog.askopenfilenames(title="파일 선택", filetypes=FILETYPES)
+        paths = filedialog.askopenfilenames(title="파일 선택", filetypes=self.filetypes)
         self._add_paths(paths)
 
     def _on_drop(self, event):
-        """드래그 앤 드롭으로 들어온 파일 경로 처리."""
         # tk.splitlist 가 중괄호({})로 묶인 공백 포함 경로까지 올바로 분리해 준다.
-        paths = self.root.tk.splitlist(event.data)
-        self._add_paths(paths)
+        self._add_paths(self.winfo_toplevel().tk.splitlist(event.data))
 
     def _add_paths(self, paths):
-        """경로 목록을 지원 형식만 걸러 중복 없이 추가한다."""
         skipped = []
         for p in paths:
             p = os.path.normpath(p)
             ext = os.path.splitext(p)[1].lower()
-            if ext not in SUPPORTED_EXTS:
+            if ext not in self.supported_exts:
                 skipped.append(os.path.basename(p))
                 continue
             if p not in self.files:
@@ -218,9 +171,9 @@ class FileRenewApp:
         if skipped:
             messagebox.showwarning(
                 APP_TITLE,
-                "지원하지 않는 형식이라 제외했습니다:\n"
+                "이 탭에서 지원하지 않는 형식이라 제외했습니다:\n"
                 + "\n".join(skipped)
-                + f"\n\n지원 형식: {SUPPORTED_DISPLAY}",
+                + f"\n\n지원 형식: {self.supported_display}",
             )
 
     def remove_selected(self):
@@ -237,42 +190,25 @@ class FileRenewApp:
         self.log.insert(tk.END, text + "\n")
         self.log.see(tk.END)
         self.log.config(state="disabled")
-        self.root.update_idletasks()
+        self.update_idletasks()
 
     def run(self):
         if not self.files:
             messagebox.showwarning(APP_TITLE, "먼저 정리할 파일을 추가해 주세요.")
             return
-
         self.run_btn.config(state="disabled")
         self.log.config(state="normal")
         self.log.delete("1.0", tk.END)
         self.log.config(state="disabled")
-
-        # UI 멈춤 방지를 위해 별도 스레드에서 처리
         threading.Thread(target=self._run_worker, daemon=True).start()
 
     def _run_worker(self):
         files = list(self.files)
-        font = self.font_var.get().strip() or DEFAULT_FONT
-        ok = 0
-        fail = 0
+        overwrite = self.opt_overwrite.get()
+        ok = fail = 0
         self._log(f"총 {len(files)}개 파일 처리 시작…\n")
         for p in files:
-            r = clean_file(
-                p,
-                overwrite=self.opt_overwrite.get(),
-                backup=True,
-                # 엑셀
-                delete_names=self.opt_names.get(),
-                remove_external_links=self.opt_links.get(),
-                unhide_sheets=self.opt_unhide.get(),
-                keep_print_areas=self.opt_keep_print.get(),
-                # PPT
-                default_font=font,
-                replace_fonts=self.opt_replace_fonts.get(),
-                remove_embedded=self.opt_remove_embedded.get(),
-            )
+            r = self._clean_one(p, overwrite)
             self._log(r.summary())
             if r.ok and os.path.abspath(r.dst_path) != os.path.abspath(r.src_path):
                 self._log(f"        → 저장: {r.dst_path}")
@@ -291,6 +227,114 @@ class FileRenewApp:
             messagebox.showwarning(
                 APP_TITLE, f"성공 {ok}개 / 실패 {fail}개. 결과 창을 확인해 주세요."
             )
+
+
+# ===========================================================================
+# 엑셀 정리기 탭
+# ===========================================================================
+class ExcelTab(CleanerTab):
+    intro = "엑셀의 깨진 이름·외부 링크·숨겨진 시트를 한 번에 정리합니다."
+    supported_exts = EXCEL_EXTS
+    filetypes = [
+        ("엑셀 파일", " ".join(f"*{e}" for e in sorted(EXCEL_EXTS))),
+        ("모든 파일", "*.*"),
+    ]
+
+    def __init__(self, master):
+        self.opt_names = tk.BooleanVar(value=True)
+        self.opt_links = tk.BooleanVar(value=True)
+        self.opt_unhide = tk.BooleanVar(value=True)
+        self.opt_keep_print = tk.BooleanVar(value=True)
+        super().__init__(master)
+
+    def _build_options(self, parent):
+        ttk.Checkbutton(
+            parent, text="정의된 이름(Names) 전부 삭제 — 깨진/숨겨진 이름 포함",
+            variable=self.opt_names,
+        ).pack(anchor="w", padx=10, pady=2)
+        ttk.Checkbutton(
+            parent, text="외부 링크/연결 제거 — 다른 통합문서 참조 제거",
+            variable=self.opt_links,
+        ).pack(anchor="w", padx=10, pady=2)
+        ttk.Checkbutton(
+            parent, text="숨겨진 시트 다시 표시 — hidden/veryHidden 복구",
+            variable=self.opt_unhide,
+        ).pack(anchor="w", padx=10, pady=2)
+        ttk.Checkbutton(
+            parent, text="인쇄 영역(Print Area)은 유지 — 이름 삭제 시 인쇄 영역/제목 보존",
+            variable=self.opt_keep_print,
+        ).pack(anchor="w", padx=10, pady=2)
+
+    def _clean_one(self, path, overwrite):
+        return clean_workbook(
+            path,
+            delete_names=self.opt_names.get(),
+            remove_external_links=self.opt_links.get(),
+            unhide_sheets=self.opt_unhide.get(),
+            keep_print_areas=self.opt_keep_print.get(),
+            overwrite=overwrite,
+            backup=True,
+        )
+
+
+# ===========================================================================
+# PPT 정리기 탭
+# ===========================================================================
+class PptTab(CleanerTab):
+    intro = "PPT의 비표준 폰트와 임베드(끼워넣은) 폰트를 기본 폰트로 정리합니다."
+    supported_exts = PPT_EXTS
+    filetypes = [
+        ("PowerPoint 파일", " ".join(f"*{e}" for e in sorted(PPT_EXTS))),
+        ("모든 파일", "*.*"),
+    ]
+
+    def __init__(self, master):
+        self.opt_replace_fonts = tk.BooleanVar(value=True)
+        self.opt_remove_embedded = tk.BooleanVar(value=True)
+        self.font_var = tk.StringVar(value=DEFAULT_FONT)
+        super().__init__(master)
+
+    def _build_options(self, parent):
+        ttk.Checkbutton(
+            parent, text="비표준 폰트를 기본 폰트로 치환 — 표준/기호 폰트는 보존",
+            variable=self.opt_replace_fonts,
+        ).pack(anchor="w", padx=10, pady=2)
+        ttk.Checkbutton(
+            parent, text="임베드(끼워넣은) 폰트 제거 — ppt/fonts 및 관련 관계 정리",
+            variable=self.opt_remove_embedded,
+        ).pack(anchor="w", padx=10, pady=2)
+        font_row = ttk.Frame(parent)
+        font_row.pack(anchor="w", fill="x", padx=10, pady=2)
+        ttk.Label(font_row, text="대치 기본 폰트:").pack(side="left")
+        ttk.Entry(font_row, textvariable=self.font_var, width=18).pack(
+            side="left", padx=(4, 0))
+
+    def _clean_one(self, path, overwrite):
+        font = self.font_var.get().strip() or DEFAULT_FONT
+        return clean_presentation(
+            path,
+            default_font=font,
+            replace_fonts=self.opt_replace_fonts.get(),
+            remove_embedded=self.opt_remove_embedded.get(),
+            overwrite=overwrite,
+            backup=True,
+        )
+
+
+# ===========================================================================
+# 메인 윈도우
+# ===========================================================================
+class FileRenewApp:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        root.title(APP_TITLE)
+        root.geometry("720x680")
+        root.minsize(640, 600)
+
+        notebook = ttk.Notebook(root)
+        notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        notebook.add(ExcelTab(notebook), text="엑셀 정리기")
+        notebook.add(PptTab(notebook), text="PPT 정리기")
 
 
 def main():
