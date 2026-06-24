@@ -196,6 +196,21 @@ class CleanerTab(ttk.Frame):
         if not self.files:
             messagebox.showwarning(APP_TITLE, "먼저 정리할 파일을 추가해 주세요.")
             return
+
+        # 원본 덮어쓰기 모드는 실행 전 경고하고 확인을 받는다.
+        if self.opt_overwrite.get():
+            proceed = messagebox.askokcancel(
+                APP_TITLE,
+                "⚠ 원본 덮어쓰기 모드입니다.\n\n"
+                f"선택한 {len(self.files)}개 파일의 원본을 정리한 내용으로 교체합니다.\n"
+                "교체 직전 원본은 자동으로 .bak 파일로 백업됩니다.\n\n"
+                "계속하시겠습니까?",
+                icon=messagebox.WARNING,
+                default=messagebox.CANCEL,
+            )
+            if not proceed:
+                return
+
         self.run_btn.config(state="disabled")
         self.log.config(state="normal")
         self.log.delete("1.0", tk.END)
