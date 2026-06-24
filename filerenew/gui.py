@@ -331,21 +331,42 @@ class FileRenewApp:
         root.geometry("720x680")
         root.minsize(640, 600)
 
-        notebook = ttk.Notebook(root)
+        self._setup_tab_style()
+
+        notebook = ttk.Notebook(root, style="Big.TNotebook")
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
-        notebook.add(ExcelTab(notebook), text="엑셀 정리기")
-        notebook.add(PptTab(notebook), text="PPT 정리기")
+        notebook.add(ExcelTab(notebook), text="  📊  엑셀 정리기  ")
+        notebook.add(PptTab(notebook), text="  📑  PPT 정리기  ")
+
+    @staticmethod
+    def _setup_tab_style():
+        """탭을 크고 잘 보이게: 글꼴·여백을 키우고 선택 탭을 강조한다."""
+        style = ttk.Style()
+        # 탭 글자를 크고 굵게, 좌우/상하 여백을 넉넉히
+        style.configure(
+            "Big.TNotebook.Tab",
+            font=("", 13, "bold"),
+            padding=(28, 12),
+        )
+        # 탭 막대와 본문 사이 간격을 살짝 띄워 구분을 또렷하게
+        style.configure("Big.TNotebook", tabmargins=(4, 6, 4, 0))
+        # 선택된 탭은 흰 배경 + 파란 글자, 비선택 탭은 회색조로 대비
+        style.map(
+            "Big.TNotebook.Tab",
+            background=[("selected", "#ffffff"), ("!selected", "#d9dde2")],
+            foreground=[("selected", "#1a5fb4"), ("!selected", "#555555")],
+            expand=[("selected", (1, 1, 1, 0))],  # 선택 탭을 살짝 키워 부각
+        )
 
 
 def main():
     # 드래그 앤 드롭 지원 시 전용 Tk 루트를 사용한다.
     root = TkinterDnD.Tk() if DND_AVAILABLE else tk.Tk()
-    # ttk 테마(가능하면 보기 좋은 테마 사용)
+    # ttk 테마: 탭 색상 강조가 잘 먹는 'clam' 을 우선 사용한다(vista 등
+    # 네이티브 테마는 탭 배경색을 무시하는 경우가 있어 구분이 약해진다).
     try:
         style = ttk.Style()
-        if "vista" in style.theme_names():
-            style.theme_use("vista")
-        elif "clam" in style.theme_names():
+        if "clam" in style.theme_names():
             style.theme_use("clam")
     except Exception:
         pass
